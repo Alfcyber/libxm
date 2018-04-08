@@ -111,7 +111,7 @@ void xm_create_context_from_libxmize(xm_context_t** ctxp, const char* libxmized,
 	if(XM_DEFENSIVE && !out) {
 		return;
 	}
-	DEBUG("allocated %lu bytes for thin context\n", sz);
+	DEBUG("allocated %lu bytes for thin context (%.2f%% sparseness)\n", sz, 100.f - 100.f * (float)sz / (float)in->ctx_size);
 
 #if XM_LIBXMIZE_DELTA_SAMPLES
 #error Delta coding samples not supported
