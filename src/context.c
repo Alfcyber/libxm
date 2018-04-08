@@ -8,10 +8,6 @@
 
 #include "xm_internal.h"
 
-#define OFFSET(ptr) do {										\
-		(ptr) = (void*)((intptr_t)(ptr) + (intptr_t)(*ctxp));	\
-	} while(0)
-
 
 
 int xm_create_context(xm_context_t** ctxp, const char* moddata, uint32_t rate) {
@@ -90,40 +86,64 @@ int xm_create_context_safe(xm_context_t** ctxp, const char* moddata, size_t modd
 	return 0;
 }
 
-void xm_create_context_from_libxmize(xm_context_t** ctxp, char* libxmized, uint32_t rate) {
+void xm_create_context_from_libxmize(xm_context_t** ctxp, const char* libxmized, uint32_t rate) {
 	size_t i, j;
+	const xm_context_t* in = (const void*)libxmized;
+	xm_context_t* out;
+	char* alloc;
 
-	*ctxp = (void*)libxmized;
+	size_t sz = sizeof(xm_context_t)
+		+ in->module.length * MAX_NUM_ROWS * sizeof(uint8_t)
+		+ in->module.num_channels * sizeof(xm_channel_context_t)
+		+ in->module.num_patterns * sizeof(xm_pattern_t)
+		+ in->module.num_instruments * sizeof(xm_instrument_t)
+		;
 
-	/* Reverse steps of libxmize.c */
-	OFFSET((*ctxp)->module.patterns);
-	OFFSET((*ctxp)->module.instruments);
-	OFFSET((*ctxp)->row_loop_count);
-	OFFSET((*ctxp)->channels);
-
-	for(i = 0; i < (*ctxp)->module.num_patterns; ++i) {
-		OFFSET((*ctxp)->module.patterns[i].slots);
+	const xm_instrument_t* inst = (void*)((intptr_t)in + (intptr_t)in->module.instruments);
+	for(i = 0; i < in->module.num_instruments; ++i) {
+		sz += inst[i].num_samples * sizeof(xm_sample_t);
 	}
 
-	for(i = 0; i < (*ctxp)->module.num_instruments; ++i) {
-		OFFSET((*ctxp)->module.instruments[i].samples);
+	alloc = malloc(sz);
+	out = (void*)alloc;
+	*ctxp = out;
 
-		for(j = 0; j < (*ctxp)->module.instruments[i].num_samples; ++j) {
-			OFFSET((*ctxp)->module.instruments[i].samples[j].data8);
+	if(XM_DEFENSIVE && !out) {
+		return;
+	}
+	DEBUG("allocated %lu bytes for thin context\n", sz);
 
-			if(XM_LIBXMIZE_DELTA_SAMPLES) {
-				if((*ctxp)->module.instruments[i].samples[j].length > 1) {
-					if((*ctxp)->module.instruments[i].samples[j].bits == 8) {
-						for(size_t k = 1; k < (*ctxp)->module.instruments[i].samples[j].length; ++k) {
-							(*ctxp)->module.instruments[i].samples[j].data8[k] += (*ctxp)->module.instruments[i].samples[j].data8[k-1];
-						}
-					} else {
-						for(size_t k = 1; k < (*ctxp)->module.instruments[i].samples[j].length; ++k) {
-							(*ctxp)->module.instruments[i].samples[j].data16[k] += (*ctxp)->module.instruments[i].samples[j].data16[k-1];
-						}
-					}
-				}
-			}
+#if XM_LIBXMIZE_DELTA_SAMPLES
+#error Delta coding samples not supported
+#endif
+
+	memset(alloc, 0, sz);
+	memcpy(out, in, sizeof(xm_context_t));
+
+	alloc += sizeof(xm_context_t);
+	out->row_loop_count = (void*)alloc;
+	alloc += in->module.length * MAX_NUM_ROWS * sizeof(uint8_t);
+	out->channels = (void*)alloc;
+	alloc += in->module.num_channels * sizeof(xm_channel_context_t);
+
+	out->module.patterns = (void*)alloc;
+	alloc += in->module.num_patterns * sizeof(xm_pattern_t);
+	const xm_pattern_t* pat = (void*)((intptr_t)in + (intptr_t)in->module.patterns);
+	memcpy(out->module.patterns, pat, in->module.num_patterns * sizeof(xm_pattern_t));
+	for(i = 0; i < in->module.num_patterns; ++i) {
+		out->module.patterns[i].slots = (void*)((intptr_t)in + (intptr_t)pat[i].slots);
+	}
+
+	out->module.instruments = (void*)alloc;
+	alloc += in->module.num_instruments * sizeof(xm_instrument_t);
+	memcpy(out->module.instruments, inst, in->module.num_instruments * sizeof(xm_instrument_t));
+	for(i = 0; i < in->module.num_instruments; ++i) {
+		out->module.instruments[i].samples = (void*)alloc;
+		alloc += inst[i].num_samples * sizeof(xm_sample_t);
+		const xm_sample_t* s = (void*)((intptr_t)in + (intptr_t)inst[i].samples);
+		memcpy(out->module.instruments[i].samples, s, inst[i].num_samples * sizeof(xm_sample_t));
+		for(j = 0; j < inst[i].num_samples; ++j) {
+			out->module.instruments[i].samples[j].data8 = (void*)((intptr_t)in + (intptr_t)s[j].data8);
 		}
 	}
 }

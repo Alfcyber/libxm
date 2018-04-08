@@ -9,7 +9,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <sys/mman.h>
-#include <sys/resource.h>
 #include <xm.h>
 
 static const unsigned int channels = 2;
@@ -45,7 +44,7 @@ int main(int argc, char** argv) {
 	assert(fp);
 	assert(fread(&datalen, sizeof(size_t), 1, fp));
 	rewind(fp);
-	data = mmap(0, datalen, PROT_READ|PROT_WRITE, MAP_PRIVATE, fileno(fp), 0);
+	data = mmap(0, datalen, PROT_READ, MAP_SHARED, fileno(fp), 0);
 	assert(data != MAP_FAILED);
 	xm_create_context_from_libxmize(&ctx, data, rate);
 
@@ -70,10 +69,7 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	struct rusage r;
-	assert(!getrusage(RUSAGE_SELF, &r));
-	fprintf(stderr, "%s: libxmized length %lu, ru_maxrss %ld\n", argv[0], datalen, r.ru_maxrss);
-
+	xm_free_context(ctx);
 	munmap(data, datalen);
 	fclose(fp);
 	return 0;
